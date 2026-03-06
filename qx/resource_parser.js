@@ -16,8 +16,6 @@ const Rule = {
       default:
         var msg = `\`${type}:...\` is not supported` + " " +
           `${type === "include" ? "" : "yet"}` + ".";
-        $notify("Invalid filter", "domainlist filter", msg);
-        $done({ error: msg });
         throw new Error(msg);
     }
   },
@@ -34,25 +32,32 @@ const Rule = {
 var content = String($resource.content)
 var url = new URL($resource.link)
 
-if (url.searchParams.get("format") === "v2ray") {
-  let add_via = url.searchParams.get("add_via") !== null;
+try {
 
-  const filterline = (line) => {
-    var line = line.trim();
-    return !(line.startsWith("#") || line === "");
+  if (url.searchParams.get("format") === "v2ray") {
+    let add_via = url.searchParams.get("add_via") !== null;
+
+    const filterline = (line) => {
+      var line = line.trim();
+      return !(line.startsWith("#") || line === "");
+    }
+    const mapline = (line, add_via) => {
+      return Rule.to_qx_rule(Rule.from_domainlist_rule(line)) +
+        (add_via ? ",via-interface=%TUN%" : "")
+    }
+
+    var result = content.split("\n")
+      .filter(line => filterline(line))
+      .map(line => mapline(line, add_via))
+      .join("\n")
+
+    $done({ content: result })
+  } else {
+    // Unmodified
+    $done({ content: content })
   }
-  const mapline = (line, add_via) => {
-    return Rule.to_qx_rule(Rule.from_domainlist_rule(line)) +
-      (add_via ? ",via-interface=%TUN%" : "")
-  }
-
-  var result = content.split("\n")
-    .filter(line => filterline(line))
-    .map(line => mapline(line, add_via))
-    .join("\n")
-
-  $done({ content: result })
-} else {
-  // Unmodified
-  $done({content: content})
+} catch (e) {
+  // Return error message as content because it's guraranteed to be
+  // printed in dialog then.
+  $done({ content: e.message })
 }
