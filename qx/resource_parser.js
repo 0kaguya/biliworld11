@@ -1,63 +1,89 @@
-// See [Example](https://raw.githubusercontent.com/crossutility/Quantumult-X/master/resource-parser.js).
+// `Resource Parser` script of QuantumultX. See
+// [Example](https://raw.githubusercontent.com/crossutility/Quantumult-X/master/resource-parser.js).
+//
+// Purposes:
+// 1. Support domain-list style ruleset by `?type=dlc` param.
+// 2. Support forward proxy by `?add_via=true` param.
+//
+// Limitations:
+// * Doesn't support regex rules of domain-list.
+
+// Home-made URL parser. They don't support URL APIs.
+const parse_url = (s) => {
+
+  const searchParams = (s) => s.split("?")[1].split("&");
+  const getKey = (kv) => kv ? kv.split("=")[0] : undefined;
+  const getVal = (kv) => kv ? kv.split("=")[1] : undefined;
+
+  return {
+    searchParams: {
+      get: (key) => {
+        return getVal(searchParams(s)
+          .find(kv => getKey(kv) === key));
+      }
+    }
+  }
+}
+
+const filter = (line) => {
+  line = line.trim();
+  return line.length > 0 && !line.startsWith("#");
+}
+
+const identity = (line) => line
 
 const Rule = {
-  domain: (text) => ({ type: "domain", text }),
-  domainSuffix: (text) => ({ type: "domain-suffix", text }),
-
-  from_domainlist_rule: (s) => {
-    let [text, type] = s.trim().split(":").reverse();
-    switch (type) {
-      case "full":
-        return Rule.domain(text);
-      case "domain":
-      case undefined:
-        return Rule.domainSuffix(text);
-      case "include":
-      default:
-        var msg = `\`${type}:...\` is not supported` + " " +
-          `${type === "include" ? "" : "yet"}` + ".";
-        throw new Error(msg);
-    }
-  },
-  to_qx_rule: (rule) => {
-    switch (rule.type) {
-      case "domain":
-        return `host,${rule.text},proxy`;
-      case "domain-suffix":
-        return `host-suffix,${rule.text},proxy`;
-    }
-  },
+  full: (text) => ({ type: "full", text }),
+  suffix: (text) => ({ type: "suffix", text }),
 }
 
-var content = String($resource.content)
-var url = new URL($resource.link)
-
-try {
-
-  if (url.searchParams.get("format") === "v2ray") {
-    let add_via = url.searchParams.get("add_via") !== null;
-
-    const filterline = (line) => {
-      var line = line.trim();
-      return !(line.startsWith("#") || line === "");
-    }
-    const mapline = (line, add_via) => {
-      return Rule.to_qx_rule(Rule.from_domainlist_rule(line)) +
-        (add_via ? ",via-interface=%TUN%" : "")
-    }
-
-    var result = content.split("\n")
-      .filter(line => filterline(line))
-      .map(line => mapline(line, add_via))
-      .join("\n")
-
-    $done({ content: result })
-  } else {
-    // Unmodified
-    $done({ content: content })
+const from_dlc_rule = (line) => {
+  const [rule, prefix] = line.split(":").reverse();
+  switch (prefix) {
+    case "full":
+      return Rule.full(rule);
+    case "regexp":
+      $done({ error: line})
+    default:
+      return Rule.suffix(rule);
   }
-} catch (e) {
-  // Return error message as content because it's guraranteed to be
-  // printed in dialog then.
-  $done({ content: e.message })
 }
+
+const to_qx_rule = (rule) => {
+  switch (rule.type) {
+    case "full":
+      return `host,${rule.text},proxy`;
+    case "suffix":
+      return `host-suffix,${rule.text},proxy`;
+  }
+}
+
+const add_via = (line) => {
+  return line + ",via-interface=%TUN%";
+}
+
+const dispatch = (type) => {
+  switch (type) {
+    case "dlc":
+      return (line) => to_qx_rule(from_dlc_rule(line));
+    case "qx":
+    case undefined:
+      return identity;
+    default:
+      $done({ error: `Unsupported param: type=${type}.` });
+  }
+}
+
+const content = $resource.content
+  .split("\n")
+  .filter(filter)
+  .map(dispatch(
+    parse_url($resource.link).searchParams.get("type")
+  ))
+  .map(
+    parse_url($resource.link).searchParams.get("add_via") ?
+      add_via : identity
+  )
+  .join("\n");
+
+$done({ content });
